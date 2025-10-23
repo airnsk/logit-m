@@ -22,7 +22,7 @@ This tool provides **deep introspection into the token generation process**, ena
 
 ### Installation and Launch
 
-1. **Download** the `llm-token-introspection.html` file from the repository
+1. **Download** the `logit-m.html` file from the repository
 2. **Open the file** in your browser (double-click or File → Open)
 3. **Enter the address** of your llama.cpp server (e.g., `http://127.0.0.1:8080/v1`)
 4. **Done!** The application is fully self-contained — all JavaScript and CSS are embedded in the HTML file
