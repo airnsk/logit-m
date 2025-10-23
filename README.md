@@ -269,3 +269,6 @@ Pull requests welcome with:
 - Metric visualization improvements
 - Integration with other inference backends
 
+---
+
+**Developed to assist in debugging LLM agents and improving prompt engineering quality**
