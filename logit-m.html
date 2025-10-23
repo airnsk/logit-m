@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title data-i18n="page_title">Интроспекция токенов LLM</title>
+<style>
+  :root {
+    --bg: #0a0e17; --fg: #e4e8ef; --muted: #8b95a8; --card: #14181f; --accent: #4a8fff;
+    --green: rgba(60,180,100,.28); --yellow: rgba(255,200,60,.26); --red: rgba(255,70,70,.28);
+    --blue: rgba(74,143,255,.22);
+    --chip: #1f2530; --chip-border: #2d3543; --hr: rgba(140,150,170,.2); --tooltip: #0f1319;
+    --shadow: 0 4px 24px rgba(0,0,0,.4); --border: rgba(130,145,170,.25);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --fg: #0f1419; --muted: #6b7280; --card: #f7f9fc; --accent: #2563eb;
+      --blue: rgba(37,99,235,.15);
+      --chip: #eef2ff; --chip-border: #d1d9ff; --tooltip: #1a1d24; --border: rgba(130,145,170,.3);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 20px; color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  input[type="number"], input[type="text"], select, textarea {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: inherit;
+  }
+  textarea { width: 100%; min-height: 100px; resize: vertical; font-family: inherit; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+  button { padding: 9px 18px; border: none; border-radius: 8px; background: var(--accent); color: white; font: inherit; font-weight: 500; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--chip); border: 1px solid var(--chip-border); border-radius: 6px; font-size: 12px; white-space: nowrap; }
+  .hr { height: 1px; background: var(--hr); margin: 12px 0; }
+  .prompt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tokens-metrics-grid { display: grid; grid-template-columns: 1fr 380px; gap: 20px; }
+  @media (max-width: 1200px) { .tokens-metrics-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 768px) { .prompt-grid { grid-template-columns: 1fr; } }
+  .tokens-view { margin-top: 12px; position: relative; z-index: 1; }
+  .tokens-view.mode-tokens { line-height: 2.4; }
+  .tokens-view.mode-tokens .token { display: inline-block; padding: 3px 5px; margin: 2px 1px; border-radius: 5px; }
+  .tokens-view.mode-text { white-space: pre-wrap; word-wrap: break-word; line-height: 1.8; font-size: 15px; }
+  .token { cursor: pointer; transition: outline .15s; }
+  .token:hover { outline: 2px solid rgba(74,143,255,.6); outline-offset: 1px; }
+  .token.conf-high { background: var(--green); } .token.conf-med { background: var(--yellow); } .token.conf-low { background: var(--red); } .token.sampled { background: var(--blue); }
+  .metrics-panel { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; height: fit-content; position: relative; z-index: 0; }
+  .metric-group { margin-bottom: 16px; } .metric-group-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; }
+  .metric-label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .metric-value { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .metric-badge { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+  .badge-green { background: var(--green); border: 1px solid rgba(60,180,100,.5); } .badge-yellow { background: var(--yellow); border: 1px solid rgba(255,200,60,.5); } .badge-red { background: var(--red); border: 1px solid rgba(255,70,70,.5); } .badge-blue { background: var(--blue); border: 1px solid rgba(74,143,255,.5); }
+  .metric-bar { width: 100%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .metric-bar-fill { height: 100%; transition: width 0.3s ease; }
+  .bar-green { background: rgba(60,180,100,.8); } .bar-yellow { background: rgba(255,200,60,.8); } .bar-red { background: rgba(255,70,70,.8); } .bar-blue { background: rgba(74,143,255,.8); }
+  .tooltip {
+    position: fixed; z-index: 9999; max-width: min(94vw, 820px);
+    background: var(--tooltip); color: #fff; padding: 11px 13px;
+    border-radius: 9px; border: 1px solid rgba(100,120,150,.4);
+    font-size: 11px; line-height: 1.45; pointer-events: none;
+    box-shadow: 0 12px 48px rgba(0,0,0,.7); display: none;
+  }
+  .tooltip.visible { display: block !important; }
+  .tooltip .header { font-size: 13px; font-weight: 700; margin-bottom: 7px; color: #6ba3ff; font-family: 'Courier New', monospace; }
+  .tooltip .params { font-size: 10px; color: #8b95b0; margin-bottom: 8px; line-height: 1.5; font-family: 'Courier New', monospace; white-space: pre; }
+  .explanation { background: rgba(74,143,255,.12); border: 1px solid rgba(74,143,255,.35); border-radius: 6px; padding: 8px 10px; margin: 8px 0; font-size: 11px; line-height: 1.5; color: #b0c8ff; }
+  .explanation strong { color: #e0f0ff; }
+  .explanation .emoji { font-size: 13px; margin-right: 4px; }
+  .divider { height: 1px; background: rgba(150,160,180,.22); margin: 8px 0; }
+  .cand-table { font-family: 'Courier New', Consolas, monospace; font-size: 10px; line-height: 1.55; }
+  .cand { white-space: pre; color: #d8e0ec; }
+  .cand .num { color: #7b8b9f; } .cand .tok { color: #e8f0ff; }
+  .cand .topk { color: #ffb060; } .cand .prob { color: #6ad090; } .cand .logp { color: #80a0ff; }
+  .cand .chosen { color: #ffd870; font-weight: 700; } .cand .cut { color: #ff7070; } .cand .ok { color: #70ff95; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1 data-i18n="title">🔍 Интроспекция генерации токенов LLM</h1>
+
+  <div class="card">
+    <div class="section-title" data-i18n="connection">Подключение</div>
+    <div class="grid">
+      <div class="form-group">
+        <label data-i18n="api_url">API URL</label>
+        <input id="apiUrl" type="text" value="http://127.0.0.1:8080/v1">
+      </div>
+      <div class="form-group">
+        <label data-i18n="model">Модель</label>
+        <input id="modelName" type="text" value="local-llama">
+      </div>
+    </div>
+    <div class="controls">
+      <div class="chip"><input type="checkbox" id="persistConn" checked><label for="persistConn" data-i18n="remember_conn">Запоминать подключение</label></div>
+      <div class="chip">
+        <label for="langSelect" style="margin-right:6px;" data-i18n="language">Язык</label>
+        <select id="langSelect">
+          <option value="auto" data-i18n="auto">Авто</option>
+          <option value="ru">Русский</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <button id="btnTestConn" data-i18n="test_conn">Проверить</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title" data-i18n="prompt">Промпт</div>
+    <div class="prompt-grid">
+      <div class="form-group">
+        <label data-i18n="user_prompt">User промпт</label>
+        <textarea id="userPrompt" placeholder="..."></textarea>
+      </div>
+      <div class="form-group">
+        <label data-i18n="system_prompt">System промпт (опционально)</label>
+        <textarea id="systemPrompt" placeholder="..."></textarea>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="form-group" style="width: 150px;">
+        <label>max_new_tokens</label>
+        <input id="maxTokens" type="number" value="64" min="1" max="2048">
+      </div>
+      <div class="form-group" style="width: 150px;">
+        <label>logprobs</label>
+        <input id="logprobsN" type="number" value="50" min="1" max="500">
+      </div>
+      <button id="btnGenerate" data-i18n="generate">Сгенерировать</button>
+      <button id="btnContinue" data-i18n="continue">Продолжить</button>
+      <select id="viewMode">
+        <option value="tokens" data-i18n="mode_tokens">Режим: Токены</option>
+        <option value="text" data-i18n="mode_text">Режим: Текст</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title" data-i18n="gen_tokens_metrics">Сгенерированные токены и метрики анализа</div>
+    <div class="tokens-metrics-grid">
+      <div><div id="tokensView" class="tokens-view mode-tokens"></div></div>
+      <div class="metrics-panel">
+        <div class="metric-group">
+          <div class="metric-group-title" data-i18n="stats_title">📊 Общая статистика</div>
+          <div class="metric-row"><span class="metric-label" data-i18n="total_tokens">Всего токенов</span><span class="metric-value" id="metricTotal">0</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="avg_conf">Средняя уверенность</span><span class="metric-value" id="metricAvgConf">—</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="avg_logp">Средний log p</span><span class="metric-value" id="metricAvgLogP">—</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="min_conf">Min уверенность</span><span class="metric-value" id="metricMinConf">—</span></div>
+        </div>
+        <div class="hr"></div>
+        <div class="metric-group">
+          <div class="metric-group-title" data-i18n="conf_dist">🎨 Распределение по уверенности</div>
+          <div class="metric-row"><span class="metric-label"><span class="metric-badge badge-green"></span><span data-i18n="high_conf">Высокая (≥90%)</span></span><span class="metric-value" id="metricHighCount">0 (0%)</span></div>
+          <div class="metric-bar"><div class="metric-bar-fill bar-green" id="metricHighBar" style="width:0%"></div></div>
+          <div class="metric-row" style="margin-top:8px;"><span class="metric-label"><span class="metric-badge badge-yellow"></span><span data-i18n="mid_conf">Средняя (70-90%)</span></span><span class="metric-value" id="metricMedCount">0 (0%)</span></div>
+          <div class="metric-bar"><div class="metric-bar-fill bar-yellow" id="metricMedBar" style="width:0%"></div></div>
+          <div class="metric-row" style="margin-top:8px;"><span class="metric-label"><span class="metric-badge badge-red"></span><span data-i18n="low_conf">Низкая (&lt;70%)</span></span><span class="metric-value" id="metricLowCount">0 (0%)</span></div>
+          <div class="metric-bar"><div class="metric-bar-fill bar-red" id="metricLowBar" style="width:0%"></div></div>
+        </div>
+        <div class="hr"></div>
+        <div class="metric-group">
+          <div class="metric-group-title" data-i18n="sampling_title">🎲 Вероятностный выбор</div>
+          <div class="metric-row"><span class="metric-label"><span class="metric-badge badge-blue"></span><span data-i18n="sampled_tokens">Вероятностные (не топ-1)</span></span><span class="metric-value" id="metricSampledCount">0 (0%)</span></div>
+          <div class="metric-bar"><div class="metric-bar-fill bar-blue" id="metricSampledBar" style="width:0%"></div></div>
+        </div>
+        <div class="hr"></div>
+        <div class="metric-group">
+          <div class="metric-group-title" data-i18n="structural_title">📝 Структурные токены</div>
+          <div class="metric-row"><span class="metric-label" data-i18n="structural_found">Найдено</span><span class="metric-value" id="metricStructCount">0</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="structural_avg">Средняя уверенность</span><span class="metric-value" id="metricStructConf">—</span></div>
+        </div>
+        <div class="hr"></div>
+        <div class="metric-group">
+          <div class="metric-group-title" data-i18n="filters_title">⚙️ Примененные фильтры</div>
+          <div class="metric-row"><span class="metric-label" data-i18n="topk_cut">top_k отсечено</span><span class="metric-value" id="metricTopKFiltered">—</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="topp_cut">top_p отсечено</span><span class="metric-value" id="metricTopPFiltered">—</span></div>
+          <div class="metric-row"><span class="metric-label" data-i18n="minp_cut">min_p отсечено</span><span class="metric-value" id="metricMinPFiltered">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title" data-i18n="sampling_params_title">Параметры сэмплинга (порядок: penalties → top_k → top_p → min_p → temperature)</div>
+    <div class="grid">
+      <div class="form-group"><label>temperature</label><input id="temperature" type="number" value="0.8" step="0.05" min="0" max="2"></div>
+      <div class="form-group"><label>top_k</label><input id="topK" type="number" value="40" min="0" max="500"></div>
+      <div class="form-group"><label>top_p (nucleus)</label><input id="topP" type="number" value="0.95" step="0.01" min="0" max="1"></div>
+      <div class="form-group"><label>min_p</label><input id="minP" type="number" value="0.05" step="0.01" min="0" max="1"></div>
+    </div>
+    <div class="hr"></div>
+    <div class="section-title" data-i18n="penalties_title">Штрафы за повторения (применяются к логитам перед фильтрацией)</div>
+    <div class="grid">
+      <div class="form-group"><label>repetition_penalty</label><input id="repPenalty" type="number" value="1.1" step="0.05" min="1" max="2"></div>
+      <div class="form-group"><label>frequency_penalty</label><input id="freqPenalty" type="number" value="0.0" step="0.1" min="-2" max="2"></div>
+      <div class="form-group"><label>presence_penalty</label><input id="presPenalty" type="number" value="0.0" step="0.1" min="-2" max="2"></div>
+    </div>
+    <div class="hr"></div>
+    <div class="controls">
+      <div class="chip"><input type="checkbox" id="enableHighlight" checked><label for="enableHighlight" data-i18n="highlight_conf">Подсветка уверенности</label></div>
+      <div class="chip"><span>🔴 &lt;</span><input id="redThreshold" type="number" value="70" min="0" max="100"><span>%</span></div>
+      <div class="chip"><span>🟡 &lt;</span><input id="yellowThreshold" type="number" value="90" min="0" max="100"><span>%</span></div>
+      <div class="chip"><span>🟢 ≥ 90%</span></div>
+      <div class="chip"><input type="checkbox" id="highlightSampled"><label for="highlightSampled" data-i18n="highlight_sampled">Вероятностные токены</label></div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+// ---- i18n ----
+const I18N_DICT = {
+  ru: {
+    page_title: "Интроспекция токенов LLM",
+    title: "🔍 Интроспекция генерации токенов LLM",
+    connection: "Подключение",
+    prompt: "Промпт",
+    gen_tokens_metrics: "Сгенерированные токены и метрики анализа",
+    sampling_params_title: "Параметры сэмплинга (порядок: penalties → top_k → top_p → min_p → temperature)",
+    penalties_title: "Штрафы за повторения (применяются к логитам перед фильтрацией)",
+    user_prompt: "User промпт",
+    system_prompt: "System промпт (опционально)",
+    generate: "Сгенерировать",
+    continue: "Продолжить",
+    mode_tokens: "Режим: Токены",
+    mode_text: "Режим: Текст",
+    api_url: "API URL",
+    model: "Модель",
+    remember_conn: "Запоминать подключение",
+    language: "Язык",
+    auto: "Авто",
+    test_conn: "Проверить",
+    stats_title: "📊 Общая статистика",
+    total_tokens: "Всего токенов",
+    avg_conf: "Средняя уверенность",
+    avg_logp: "Средний log p",
+    min_conf: "Min уверенность",
+    conf_dist: "🎨 Распределение по уверенности",
+    high_conf: "Высокая (≥90%)",
+    mid_conf: "Средняя (70-90%)",
+    low_conf: "Низкая (<70%)",
+    sampling_title: "🎲 Вероятностный выбор",
+    sampled_tokens: "Вероятностные (не топ-1)",
+    structural_title: "📝 Структурные токены",
+    structural_found: "Найдено",
+    structural_avg: "Средняя уверенность",
+    filters_title: "⚙️ Примененные фильтры",
+    topk_cut: "top_k отсечено",
+    topp_cut: "top_p отсечено",
+    minp_cut: "min_p отсечено",
+    highlight_conf: "Подсветка уверенности",
+    highlight_sampled: "Вероятностные токены",
+    enter_user_prompt: "Введите user промпт",
+    test_ok: "Подключение успешно!",
+    test_err: "Ошибка подключения: ",
+    empty_resp: "Пустой ответ",
+    first_generate: "Сначала сгенерируйте начальный ответ",
+    error: "Ошибка: ",
+    step: "Шаг",
+    no_candidates: "Нет данных о кандидатах для этого шага.",
+    greedy: "Жадный выбор (T≈0)",
+    chosen_top1: "Выбран топ-1 кандидат",
+    prob_sampling: "Вероятностный сэмплинг: выбран токен ранга",
+    filtered: "Отфильтровано"
+  },
+  en: {
+    page_title: "LLM Token Introspection",
+    title: "🔍 LLM Token Generation Introspection",
+    connection: "Connection",
+    prompt: "Prompt",
+    gen_tokens_metrics: "Generated Tokens & Metrics",
+    sampling_params_title: "Sampling parameters (order: penalties → top_k → top_p → min_p → temperature)",
+    penalties_title: "Repetition penalties (applied to logits before filtering)",
+    user_prompt: "User prompt",
+    system_prompt: "System prompt (optional)",
+    generate: "Generate",
+    continue: "Continue",
+    mode_tokens: "Mode: Tokens",
+    mode_text: "Mode: Text",
+    api_url: "API URL",
+    model: "Model",
+    remember_conn: "Remember connection",
+    language: "Language",
+    auto: "Auto",
+    test_conn: "Test",
+    stats_title: "📊 Summary Statistics",
+    total_tokens: "Total tokens",
+    avg_conf: "Average confidence",
+    avg_logp: "Average log p",
+    min_conf: "Min confidence",
+    conf_dist: "🎨 Confidence Distribution",
+    high_conf: "High (≥90%)",
+    mid_conf: "Medium (70-90%)",
+    low_conf: "Low (<70%)",
+    sampling_title: "🎲 Probabilistic Selection",
+    sampled_tokens: "Sampled (not top-1)",
+    structural_title: "📝 Structural Tokens",
+    structural_found: "Found",
+    structural_avg: "Average confidence",
+    filters_title: "⚙️ Applied Filters",
+    topk_cut: "top_k filtered",
+    topp_cut: "top_p filtered",
+    minp_cut: "min_p filtered",
+    highlight_conf: "Highlight confidence",
+    highlight_sampled: "Highlight sampled tokens",
+    enter_user_prompt: "Enter user prompt",
+    test_ok: "Connection successful!",
+    test_err: "Connection error: ",
+    empty_resp: "Empty response",
+    first_generate: "Generate an initial response first",
+    error: "Error: ",
+    step: "Step",
+    no_candidates: "No candidate data for this step.",
+    greedy: "Greedy choice (T≈0)",
+    chosen_top1: "Top-1 candidate chosen",
+    prob_sampling: "Probabilistic sampling: chosen token with rank",
+    filtered: "Filtered"
+  }
+};
+
+function detectBrowserLang() {
+  const navLangs = (navigator.languages || [navigator.language || navigator.userLanguage || '']).map(l => l.toLowerCase());
+  return navLangs.some(l => l.startsWith('ru')) ? 'ru' : 'en';
+}
+
+function getCurrentLang() {
+  const saved = localStorage.getItem('llm_lang');
+  if (saved && (saved === 'ru' || saved === 'en')) return saved;
+  const sel = document.getElementById('langSelect')?.value;
+  return (sel && sel !== 'auto') ? sel : detectBrowserLang();
+}
+
+function applyI18n() {
+  const lang = getCurrentLang();
+  document.documentElement.lang = lang;
+  const dict = I18N_DICT[lang] || I18N_DICT.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key]) {
+      if (el.tagName === 'TITLE') el.textContent = dict.page_title;
+      else el.textContent = dict[key];
+    }
+  });
+  const placeHolderMap = [['userPrompt','user_prompt'], ['systemPrompt','system_prompt']];
+  placeHolderMap.forEach(([id,key])=>{ const el=document.getElementById(id); if(el&&dict[key]) el.placeholder=dict[key]; });
+}
+
+function setLang(langValue) {
+  if (langValue === 'auto') localStorage.removeItem('llm_lang');
+  else localStorage.setItem('llm_lang', langValue);
+  applyI18n();
+}
+// ---- /i18n ----
+
+let generatedSteps = [], stepCandidates = [], tokenHistory = [], conversationMessages = [], lastAssistantContent = '', isBusy = false;
+
+const exp = x => Math.exp(Math.max(x, -100));
+const fmt = p => { if (p === null || p === undefined || isNaN(p)) return 'N/A'; return (p * 100).toFixed(2); };
+
+function getApiUrl() { return document.getElementById('apiUrl').value.trim() || 'http://127.0.0.1:8080/v1'; }
+function getModelName() { return document.getElementById('modelName').value.trim() || 'local-llama'; }
+
+(function initConnSettings(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('llm_conn') || '{}');
+    if (saved.apiUrl) document.getElementById('apiUrl').value = saved.apiUrl;
+    if (saved.modelName) document.getElementById('modelName').value = saved.modelName;
+    document.getElementById('persistConn').checked = saved.persist !== false;
+  } catch {}
+  const persistToggle = () => {
+    if (!document.getElementById('persistConn').checked) { localStorage.removeItem('llm_conn'); return; }
+    const payload = { apiUrl: getApiUrl(), modelName: getModelName(), persist: document.getElementById('persistConn').checked };
+    localStorage.setItem('llm_conn', JSON.stringify(payload));
+  };
+  ['apiUrl','modelName','persistConn'].forEach(id => document.getElementById(id).addEventListener('change', persistToggle));
+})();
+
+document.getElementById('btnTestConn').addEventListener('click', async () => {
+  try {
+    const url = getApiUrl().replace(/\/+$/, '') + '/models';
+    const resp = await fetch(url, { method: 'GET' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    alert((I18N_DICT[getCurrentLang()]?.test_ok) || 'Connection successful!');
+  } catch (e) {
+    alert(((I18N_DICT[getCurrentLang()]?.test_err) || 'Connection error: ') + e.message);
+  }
+});
+
+function isStructuralToken(token) {
+  const t = token.trim();
+  if (!t) return false;
+  const structuralTokens = ['#', '##', '###', '####', '-', '*', '+', '<', '>', '{', '}', '[', ']', '|', '---', '==='];
+  if (structuralTokens.includes(t)) return true;
+  if (/^\d+\.$/.test(t)) return true;
+  if (t.startsWith('</') && t.endsWith('>')) return true;
+  return false;
+}
+
+function applyPenalties(candidates, history, repPen, freqPen, presPen) {
+  const window = history.slice(-64);
+  const freqMap = {}; window.forEach(t => freqMap[t] = (freqMap[t] || 0) + 1);
+  return candidates.map(c => {
+    let adjustedLogit = c.logprob;
+    if (adjustedLogit === null || isNaN(adjustedLogit)) adjustedLogit = -100;
+    const penalties = { rep:false, freq:false, pres:false };
+    if (repPen > 1.0 && window.includes(c.token)) { adjustedLogit = adjustedLogit > 0 ? adjustedLogit/repPen : adjustedLogit*repPen; penalties.rep = true; }
+    if (freqPen !== 0 && freqMap[c.token]) { adjustedLogit -= freqPen * freqMap[c.token]; penalties.freq = true; }
+    if (presPen !== 0 && window.includes(c.token)) { adjustedLogit -= presPen; penalties.pres = true; }
+    return { ...c, adjustedLogit, penalties };
+  });
+}
+
+function filterTopK(candidates, k) {
+    if (k <= 0 || k >= candidates.length) return candidates;
+    const sorted = candidates.slice().sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1));
+    const kept = new Set(sorted.slice(0, k).map(c => c.token));
+    return candidates.map(c => ({...c, filteredBy: kept.has(c.token) ? c.filteredBy : 'top_k'}));
+}
+
+function filterTopP(candidates, p) {
+    const sorted = candidates.slice().sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1));
+    let cumulative = 0;
+    const kept = new Set();
+    for (const c of sorted) {
+        if (cumulative > p) break;
+        kept.add(c.token);
+        cumulative += c.prob ?? 0;
+    }
+    return candidates.map(c => ({...c, filteredBy: kept.has(c.token) ? c.filteredBy : 'top_p'}));
+}
+
+function filterMinP(candidates, minP) {
+    const maxProb = Math.max(...candidates.map(c => c.prob ?? 0));
+    const threshold = maxProb * minP;
+    return candidates.map(c => ({...c, filteredBy: (c.prob ?? 0) >= threshold ? c.filteredBy : 'min_p'}));
+}
+
+function applyTemperature(candidates, temp) {
+    if (temp === 0 || temp < 0.001) {
+        const maxLogit = Math.max(...candidates.map(c => c.adjustedLogit));
+        return candidates.map(c => ({...c, finalProb: c.adjustedLogit === maxLogit ? 1.0 : 0.0}));
+    }
+    const scaled = candidates.map(c => ({...c, tempLogit: c.adjustedLogit / temp}));
+    const maxLogit = Math.max(...scaled.map(c => c.tempLogit));
+    const exps = scaled.map(c => ({...c, expVal: exp(c.tempLogit - maxLogit)}));
+    const sumExp = exps.reduce((sum, c) => sum + c.expVal, 0);
+    return exps.map(c => ({...c, finalProb: c.expVal / sumExp}));
+}
+
+function analyzeSampling(rawCandidates, chosenToken, history, params) {
+    let candidates = applyPenalties(rawCandidates, history, params.repPen, params.freqPen, params.presPen);
+    const maxLogit = Math.max(...candidates.map(c => c.adjustedLogit));
+    candidates = candidates.map(c => ({...c, expVal: exp(c.adjustedLogit - maxLogit)}));
+    const sumExp = candidates.reduce((sum, c) => sum + c.expVal, 0);
+    candidates = candidates.map(c => ({...c, prob: c.expVal / sumExp, filteredBy: null}));
+    candidates = filterTopK(candidates, params.topK);
+    candidates = filterTopP(candidates, params.topP);
+    candidates = filterMinP(candidates, params.minP);
+    candidates = applyTemperature(candidates, params.temp);
+    candidates.sort((a, b) => (b.finalProb ?? -1) - (a.finalProb ?? -1));
+    const sortedByOrigProb = candidates.slice().sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1));
+    sortedByOrigProb.forEach((c, i) => c.topKRank = i + 1);
+    return candidates.map(c => ({...c, isChosen: c.token === chosenToken}));
+}
+
+function renderTokens() {
+  const view = document.getElementById('viewMode').value;
+  const enableHL = document.getElementById('enableHighlight').checked;
+  const highlightSampled = document.getElementById('highlightSampled').checked;
+  const redT = parseFloat(document.getElementById('redThreshold').value)/100;
+  const yellowT = parseFloat(document.getElementById('yellowThreshold').value)/100;
+  const cont = document.getElementById('tokensView');
+  cont.innerHTML = ''; cont.className = 'tokens-view mode-' + view;
+  generatedSteps.forEach((s,i)=>{
+    const el=document.createElement('span'); el.className='token'; el.textContent=s.token; el.dataset.stepIdx=i;
+    if (highlightSampled && s.isSampled) el.classList.add('sampled');
+    else if (enableHL && s.prob!==null) {
+      if (s.prob < redT) el.classList.add('conf-low'); else if (s.prob < yellowT) el.classList.add('conf-med'); else el.classList.add('conf-high');
+    }
+    el.addEventListener('mouseenter',showTooltip); el.addEventListener('mousemove',updateTooltipPosition); el.addEventListener('mouseleave',hideTooltip);
+    cont.appendChild(el);
+  });
+  updateMetrics();
+}
+
+function updateMetrics(){
+  const probs = generatedSteps.map(s=>s.prob).filter(p=>p!==null&&!isNaN(p));
+  const logps = generatedSteps.map(s=>s.logprob).filter(v=>v!==null&&!isNaN(v));
+  const redT = parseFloat(document.getElementById('redThreshold').value)/100;
+  const yellowT = parseFloat(document.getElementById('yellowThreshold').value)/100;
+  const total = generatedSteps.length;
+  document.getElementById('metricTotal').textContent = total;
+  if (probs.length){ const avg=probs.reduce((a,b)=>a+b,0)/probs.length; const min=Math.min(...probs);
+    document.getElementById('metricAvgConf').textContent = fmt(avg)+'%';
+    document.getElementById('metricMinConf').textContent = fmt(min)+'%';
+  } else { document.getElementById('metricAvgConf').textContent='—'; document.getElementById('metricMinConf').textContent='—'; }
+  if (logps.length){ const av=logps.reduce((a,b)=>a+b,0)/logps.length; document.getElementById('metricAvgLogP').textContent = av.toFixed(3); }
+  else document.getElementById('metricAvgLogP').textContent='—';
+  const hi=probs.filter(p=>p>=yellowT).length, me=probs.filter(p=>p>=redT&&p<yellowT).length, lo=probs.filter(p=>p<redT).length;
+  const hiPct=total? (hi/total*100).toFixed(1):0, mePct=total? (me/total*100).toFixed(1):0, loPct=total? (lo/total*100).toFixed(1):0;
+  document.getElementById('metricHighCount').textContent=`${hi} (${hiPct}%)`;
+  document.getElementById('metricMedCount').textContent=`${me} (${mePct}%)`;
+  document.getElementById('metricLowCount').textContent=`${lo} (${loPct}%)`;
+  document.getElementById('metricHighBar').style.width=hiPct+'%';
+  document.getElementById('metricMedBar').style.width=mePct+'%';
+  document.getElementById('metricLowBar').style.width=loPct+'%';
+  const sampled = generatedSteps.filter(s=>s.isSampled).length, smpPct = total? (sampled/total*100).toFixed(1):0;
+  document.getElementById('metricSampledCount').textContent=`${sampled} (${smpPct}%)`;
+  document.getElementById('metricSampledBar').style.width=smpPct+'%';
+  const struct = generatedSteps.filter(s=>isStructuralToken(s.token));
+  const structProbs = struct.map(s=>s.prob).filter(p=>p!==null&&!isNaN(p));
+  document.getElementById('metricStructCount').textContent = struct.length;
+  document.getElementById('metricStructConf').textContent = structProbs.length? fmt(structProbs.reduce((a,b)=>a+b,0)/structProbs.length)+'%' : '—';
+  let fK=0,fP=0,fM=0; stepCandidates.forEach(cs=>{ if(!cs)return; fK+=cs.filter(x=>x.filteredBy==='top_k').length; fP+=cs.filter(x=>x.filteredBy==='top_p').length; fM+=cs.filter(x=>x.filteredBy==='min_p').length; });
+  document.getElementById('metricTopKFiltered').textContent=fK||'0';
+  document.getElementById('metricTopPFiltered').textContent=fP||'0';
+  document.getElementById('metricMinPFiltered').textContent=fM||'0';
+}
+
+function showTooltip(e) {
+  const t = document.getElementById('tooltip');
+  try {
+    const stepIdx = parseInt(e.target.dataset.stepIdx);
+    const candidates = stepCandidates[stepIdx] || [];
+    const params = getParams();
+    const chosen = generatedSteps[stepIdx] || { token: '' };
+    const langDict = I18N_DICT[getCurrentLang()] || I18N_DICT.en;
+
+    let html = `<div class="header">${langDict.step} ${stepIdx + 1}: "${escapeHtml(chosen.token || '')}"</div>`;
+    html += `<div class="params">T=${params.temp ?? '—'} | top_k=${params.topK ?? '—'} | top_p=${params.topP ?? '—'} | min_p=${params.minP ?? '—'}\nrep=${params.repPen ?? '—'} | freq=${params.freqPen ?? '—'} | pres=${params.presPen ?? '—'}</div>`;
+
+    if (!candidates.length) {
+      html += `<div class="explanation">${langDict.no_candidates}</div>`;
+      t.innerHTML = html;
+      return;
+    }
+
+    const alive = candidates.filter(c => !c.filteredBy);
+    const topAlive = alive.slice().sort((a, b) => (b.finalProb ?? -1) - (a.finalProb ?? -1));
+    const chosenRank = Math.max(1, topAlive.findIndex(c => c.isChosen) + 1);
+
+    html += '<div class="explanation">';
+    if (params.temp < 0.001) html += `🎯 <strong>${langDict.greedy}:</strong> selected top probability token.`;
+    else if (chosenRank === 1) html += `✅ <strong>${langDict.chosen_top1}</strong>.`;
+    else {
+        html += `🎲 <strong>${langDict.prob_sampling} ${chosenRank}</strong>.`;
+        const top1 = topAlive[0];
+        if (top1 && !top1.isChosen) {
+            const pStr = fmt(top1.finalProb);
+            html += ` Top-1 was "${escapeHtml(top1.token || '')}" (p=${pStr}%).`;
+        }
+    }
+    const filtered = candidates.filter(c => c.filteredBy);
+    if (filtered.length) {
+        const agg = {}; filtered.forEach(c => agg[c.filteredBy] = (agg[c.filteredBy] || 0) + 1);
+        html += `<br>${langDict.filtered}: ${filtered.length} (${Object.entries(agg).map(([k,v]) => `${k}=${v}`).join(', ')}).`;
+    }
+    html += '</div><div class="divider"></div><div class="cand-table">';
+
+    candidates.slice(0, 25).forEach((c, i) => {
+        const tok = escapeHtml(c.token || '');
+        const tokShort = tok.length > 15 ? tok.substring(0, 15) : tok;
+        const probStr = fmt(c.finalProb);
+        const logpStr = (c.logprob != null) ? c.logprob.toFixed(2) : 'N/A';
+        const rankStr = String(c.topKRank ?? 'N/A');
+        const pm = [];
+        if (c.penalties?.rep) pm.push('rep');
+        if (c.penalties?.freq) pm.push('frq');
+        if (c.penalties?.pres) pm.push('prs');
+        const status = c.isChosen ? '<span class="chosen">✓</span>' : (c.filteredBy ? `<span class="cut">✗${c.filteredBy}</span>` : '<span class="ok">ok</span>');
+        html += `<div class="cand"><span class="num">${String(i+1).padStart(2,' ')}.</span> <span class="tok">${tokShort.padEnd(15, ' ')}</span> <span class="topk">k=${rankStr.padStart(2,' ')}</span> <span class="prob">p=${probStr.padStart(6,' ')}%</span> <span class="logp">log=${logpStr.padStart(7,' ')}</span> ${status} ${pm.length ? `[${pm.join(',')}]` : ''}</div>`;
+    });
+    html += '</div>';
+    t.innerHTML = html;
+  } catch (err) {
+    t.innerHTML = `<div style="padding:10px;">Error rendering tooltip: ${err.message}</div>`;
+    console.error('Tooltip error:', err);
+  } finally {
+    t.classList.add('visible');
+    updateTooltipPosition(e);
+  }
+}
+function updateTooltipPosition(e){ const t=document.getElementById('tooltip'); if(!t.classList.contains('visible'))return; const pad=12,vw=innerWidth,vh=innerHeight, r=t.getBoundingClientRect(); let x=e.clientX+pad,y=e.clientY+pad;
+  if (x+r.width>vw-pad) x=Math.max(pad,e.clientX-r.width-pad); if (y+r.height>vh-pad) y=Math.max(pad,e.clientY-r.height-pad); t.style.left=x+'px'; t.style.top=y+'px'; }
+function hideTooltip(){ document.getElementById('tooltip').classList.remove('visible'); }
+function escapeHtml(text){ const d=document.createElement('div'); d.textContent=text; return d.innerHTML; }
+
+function getParams(){ return {
+  temp: parseFloat(document.getElementById('temperature').value),
+  topK: parseInt(document.getElementById('topK').value),
+  topP: parseFloat(document.getElementById('topP').value),
+  minP: parseFloat(document.getElementById('minP').value),
+  repPen: parseFloat(document.getElementById('repPenalty').value),
+  freqPen: parseFloat(document.getElementById('freqPenalty').value),
+  presPen: parseFloat(document.getElementById('presPenalty').value),
+}; }
+
+function buildMessages(userContent){
+  const sys=document.getElementById('systemPrompt').value.trim();
+  const msgs=[]; if (sys) msgs.push({role:'system', content: sys}); msgs.push({role:'user', content: userContent}); return msgs;
+}
+
+async function callAPI(messages){
+  const p=getParams();
+  const body={
+    model: getModelName(),
+    messages: messages,
+    max_tokens: parseInt(document.getElementById('maxTokens').value),
+    temperature: p.temp, top_k: p.topK, top_p: p.topP, min_p: p.minP,
+    repetition_penalty: p.repPen, frequency_penalty: p.freqPen, presence_penalty: p.presPen,
+    logprobs: parseInt(document.getElementById('logprobsN').value),
+    stream: false
+  };
+  const url = getApiUrl().replace(/\/+$/,'') + '/chat/completions';
+  const response = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!response.ok){ const text=await response.text(); throw new Error('HTTP '+response.status+': '+text); }
+  return await response.json();
+}
+
+function processResponse(choice){
+  const content = (choice?.message?.content) || '';
+  const lp = choice?.logprobs;
+  if (!lp || !Array.isArray(lp.content)){
+    if (content){ const base=generatedSteps.length; generatedSteps.push({token: content, logprob:null, prob:null, stepIdx:base, isSampled:false}); tokenHistory.push(content); stepCandidates[base]=[]; }
+    return content;
+  }
+  const p=getParams(); const base=generatedSteps.length;
+  lp.content.forEach((st, i)=>{
+    const chosenTok = st.token || ''; const chosenLogp = st.logprob; const chosenProb = chosenLogp !== null ? exp(chosenLogp) : null;
+    const idx = base + i;
+    const raw = (st.top_logprobs || []).map(c=>({ token:c.token||'', logprob:c.logprob, prob: exp(c.logprob) }));
+    if (!raw.find(c=>c.token===chosenTok)) raw.unshift({ token: chosenTok, logprob: chosenLogp, prob: chosenProb });
+    const analyzed = analyzeSampling(raw, chosenTok, tokenHistory.slice(0), p);
+    stepCandidates[idx] = analyzed;
+    const alive = analyzed.filter(c=>!c.filteredBy).sort((a,b)=>(b.finalProb ?? -1) - (a.finalProb ?? -1));
+    const chosenRank = alive.findIndex(c=>c.isChosen)+1; const isSampled = chosenRank > 1;
+    generatedSteps.push({ token: chosenTok, logprob: chosenLogp, prob: chosenProb, stepIdx: idx, isSampled });
+    tokenHistory.push(chosenTok);
+  });
+  return content;
+}
+
+async function generate(){
+  if (isBusy) return;
+  const userText = document.getElementById('userPrompt').value.trim();
+  if (!userText){ alert((I18N_DICT[getCurrentLang()]?.enter_user_prompt) || 'Enter user prompt'); return; }
+  isBusy = true; document.getElementById('btnGenerate').disabled=true; document.getElementById('btnContinue').disabled=true;
+  try{
+    conversationMessages = buildMessages(userText);
+    generatedSteps=[]; stepCandidates=[]; tokenHistory=[];
+    const data = await callAPI(conversationMessages);
+    const choice = data?.choices?.[0];
+    if (!choice) throw new Error((I18N_DICT[getCurrentLang()]?.empty_resp) || 'Empty response');
+    const assistantMessage = processResponse(choice);
+    lastAssistantContent = assistantMessage;
+    conversationMessages.push({ role:'assistant', content: assistantMessage });
+    renderTokens();
+  } catch(err){ alert(((I18N_DICT[getCurrentLang()]?.error) || 'Error: ') + err.message); }
+  finally{ isBusy=false; document.getElementById('btnGenerate').disabled=false; document.getElementById('btnContinue').disabled=false; }
+}
+
+async function continueGeneration(){
+  if (isBusy) return;
+  if (!conversationMessages.length){ alert((I18N_DICT[getCurrentLang()]?.first_generate) || 'Generate an initial response first'); return; }
+  isBusy = true; document.getElementById('btnGenerate').disabled=true; document.getElementById('btnContinue').disabled=true;
+  try{
+    const last = conversationMessages[conversationMessages.length-1];
+    if (last && last.role==='assistant') last.content = lastAssistantContent;
+    const data = await callAPI(conversationMessages);
+    const choice = data?.choices?.[0];
+    if (!choice) throw new Error((I18N_DICT[getCurrentLang()]?.empty_resp) || 'Empty response');
+    const newContent = processResponse(choice);
+    lastAssistantContent += newContent;
+    conversationMessages[conversationMessages.length-1].content = lastAssistantContent;
+    renderTokens();
+  } catch(err){ alert(((I18N_DICT[getCurrentLang()]?.error) || 'Error: ') + err.message); }
+  finally{ isBusy=false; document.getElementById('btnGenerate').disabled=false; document.getElementById('btnContinue').disabled=false; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('langSelect');
+  const savedLang = localStorage.getItem('llm_lang');
+  if (sel) {
+    if (savedLang === 'ru' || savedLang === 'en') sel.value = savedLang;
+    else sel.value = 'auto';
+    sel.addEventListener('change', (e) => setLang(e.target.value));
+  }
+  applyI18n();
+
+  document.getElementById('btnGenerate').addEventListener('click', generate);
+  document.getElementById('btnContinue').addEventListener('click', continueGeneration);
+  document.getElementById('viewMode').addEventListener('change', renderTokens);
+  ['enableHighlight','redThreshold','yellowThreshold','highlightSampled'].forEach(id=>document.getElementById(id).addEventListener('change', renderTokens));
+});
+</script>
+
+</body>
+</html>
